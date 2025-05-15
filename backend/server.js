@@ -5,18 +5,18 @@ import { WebSocketServer } from 'ws'; // Ensure 'ws' is imported correctly
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
-// path and fileURLToPath are not used in this snippet, remove if not used elsewhere
-// import path from 'path';
-// import { fileURLToPath } from 'url';
 
-import User from './models/User.js';
-import Message from './models/Message.js';
-import { processAndSaveMessage, getMessageHistory } from './controllers/messageController.js'; // Import getMessageHistory
+// --- Import services and controllers ---
+import User from './models/User.js'; // To find user for push
+import Message from './models/Message.js'; // To save messages and fetch history
+import { processAndSaveMessage } from './controllers/messageController.js'; // For processing new messages
 
+// --- Import Routes ---
 import authRoutes from './routes/authRoutes.js';
 import pushRoutes from './routes/pushRoutes.js';
-import messageRoutes from './routes/messageRoutes.js';
+import messageRoutes from './routes/messageRoutes.js'; // For HTTP message history endpoint
 
+// --- Load Environment Variables ---
 dotenv.config();
 
 const PORT = process.env.PORT || 3001;
@@ -24,6 +24,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 
+// --- Basic Validations ---
 if (!MONGO_URI) {
   console.error('FATAL ERROR: MONGO_URI is not defined in .env file.');
   process.exit(1);
@@ -34,21 +35,28 @@ if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
   );
 }
 
+// --- Initialize Express App ---
 const app = express();
-const server = http.createServer(app);
+const server = http.createServer(app); // Create HTTP server for Express and WebSockets
 
+// --- Middleware ---
+// CORS Configuration
 const corsOptions = {
   origin: [
-    'http://localhost:5173',
+    'http://localhost:5173', // Vite dev server (default)
     'http://127.0.0.1:5173',
-    // Add your Vercel frontend deployment URL here
+    'https://always-connected.vercel.app' // YOUR DEPLOYED VERCEL FRONTEND URL
   ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Explicitly allow common methods
+  allowedHeaders: ['Content-Type', 'Authorization'], // Add other headers if your app uses them
+  credentials: true,
   optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json()); // To parse JSON request bodies
+app.use(express.urlencoded({ extended: true })); // To parse URL-encoded request bodies
 
+// --- MongoDB Connection ---
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Successfully connected to MongoDB.'))
   .catch(err => {
@@ -56,10 +64,14 @@ mongoose.connect(MONGO_URI)
     process.exit(1);
   });
 
-const wss = new WebSocketServer({ server });
+// --- WebSocket Server Setup ---
+const wss = new WebSocketServer({ server }); // Attach WebSocket server to the HTTP server
+
+// Store active WebSocket connections, mapping userId to WebSocket client
 const activeConnections = new Map(); // Map<userId, Set<WebSocket>>
 
 wss.on('connection', (ws, req) => {
+  // Extract userId from query parameters (e.g., ws://localhost:3001?userId=Shivam)
   const urlParams = new URLSearchParams(req.url.substring(req.url.indexOf('?')));
   const userId = urlParams.get('userId');
 
@@ -72,6 +84,7 @@ wss.on('connection', (ws, req) => {
 
   console.log(`WebSocket client connected: ${userId}`);
 
+  // Add connection to our map
   if (!activeConnections.has(userId)) {
     activeConnections.set(userId, new Set());
   }
@@ -80,6 +93,7 @@ wss.on('connection', (ws, req) => {
   // Send connection acknowledgment
   ws.send(JSON.stringify({ type: 'connectionAck', message: `Successfully connected as ${userId}.` }));
 
+  // Handle incoming messages from this client
   ws.on('message', async (message) => {
     console.log(`Received message from ${userId}: ${message}`);
     let parsedMessage;
@@ -91,7 +105,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    const { type, text, recipient, sender, user1, user2: msgUser2 } = parsedMessage; // msgUser2 to avoid conflict with function-scoped user2
+    const { type, text, recipient, sender, user1, user2: msgUser2 } = parsedMessage;
 
     if (type === 'fetchHistory') {
         if (!user1 || !msgUser2) {
@@ -99,15 +113,14 @@ wss.on('connection', (ws, req) => {
             return;
         }
         try {
-            // Re-use the getMessageHistory logic but adapt it for WebSocket
             const messagesFromDb = await Message.find({
               $or: [
                 { sender: user1, recipient: msgUser2 },
                 { sender: msgUser2, recipient: user1 },
               ],
             })
-            .sort({ timestamp: 1 })
-            .limit(100);
+            .sort({ timestamp: 1 }) // Oldest first
+            .limit(100); // Limit history
 
             const formattedMessages = messagesFromDb.map(msg => ({
               id: msg._id.toString(),
@@ -131,9 +144,8 @@ wss.on('connection', (ws, req) => {
         return; // Done handling fetchHistory
     }
 
-
     // For sending new messages
-    if (sender !== userId) {
+    if (sender !== userId) { // Validate sender matches connected user
         console.warn(`Message sender mismatch. Expected ${userId}, got ${sender}. Ignoring.`);
         ws.send(JSON.stringify({ type: 'error', message: 'Sender mismatch.' }));
         return;
@@ -143,24 +155,26 @@ wss.on('connection', (ws, req) => {
         ws.send(JSON.stringify({ type: 'error', message: 'Invalid recipient.' }));
         return;
     }
-    if (!type || !text) {
+     if (!type || (!text && (type === 'customMessage' || type === 'predefinedMessage'))) { // Ensure text is present for message types
         ws.send(JSON.stringify({ type: 'error', message: 'Message type or text missing.' }));
         return;
     }
 
+
     try {
+      // Process message (save to DB, call Gemini, trigger push)
       const processedMessageForBroadcast = await processAndSaveMessage({
         sender: sender,
         recipient: recipient,
         type: type,
-        text: text, // Core content for Gemini or custom text
+        text: text, // This is the core content (original phrase for predefined, or custom text)
       });
 
       // Broadcast to recipient's WebSocket connections
       const recipientConnections = activeConnections.get(processedMessageForBroadcast.recipient);
       if (recipientConnections) {
         recipientConnections.forEach(client => {
-          if (client.readyState === ws.OPEN) { // ws.OPEN or WebSocket.OPEN
+          if (client.readyState === ws.OPEN) {
             client.send(JSON.stringify(processedMessageForBroadcast));
             console.log(`Processed message sent via WebSocket to ${processedMessageForBroadcast.recipient}`);
           }
@@ -169,12 +183,10 @@ wss.on('connection', (ws, req) => {
         console.log(`Recipient ${processedMessageForBroadcast.recipient} is not connected via WebSocket.`);
       }
 
-      // Echo message back to sender so their UI updates consistently
-      // The frontend's optimistic update might differ slightly (e.g., no Gemini note yet)
-      // Sending the processed message ensures consistency.
-      ws.send(JSON.stringify(processedMessageForBroadcast));
+      // Echo the fully processed message back to the sender for UI consistency
+      // This ensures the sender sees the message exactly as it was saved/enriched (including Gemini note)
+      ws.send(JSON.stringify({ ...processedMessageForBroadcast, type: 'messageEcho' })); // Use a distinct type for echo if needed
       console.log(`Processed message echoed back to sender ${sender}`);
-
 
     } catch (processingError) {
       console.error('Error processing and saving message:', processingError.message);
@@ -182,6 +194,7 @@ wss.on('connection', (ws, req) => {
     }
   });
 
+  // Handle client disconnection
   ws.on('close', () => {
     console.log(`WebSocket client disconnected: ${userId}`);
     if (activeConnections.has(userId)) {
@@ -194,7 +207,8 @@ wss.on('connection', (ws, req) => {
 
   ws.on('error', (error) => {
     console.error(`WebSocket error for ${userId}:`, error);
-    if (activeConnections.has(userId)) {
+    // Clean up connection if it's still in the map
+     if (activeConnections.has(userId)) {
       activeConnections.get(userId).delete(ws);
       if (activeConnections.get(userId).size === 0) {
         activeConnections.delete(userId);
@@ -205,22 +219,27 @@ wss.on('connection', (ws, req) => {
 
 console.log('WebSocket server initialized.');
 
+// --- API Routes ---
+// Prefix all API routes with /api
 app.use('/api/auth', authRoutes);
-app.use('/api/push', pushRoutes);
-app.use('/api/messages', messageRoutes);
+app.use('/api/push', pushRoutes); // For subscribing/unsubscribing to push
+app.use('/api/messages', messageRoutes); // For HTTP message history, etc.
 
+// --- Basic Root Route (Optional) ---
 app.get('/', (req, res) => {
   res.send('Always Connected Backend is running!');
 });
 
+// --- Global Error Handler (Basic) ---
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.stack || err);
   res.status(err.status || 500).json({
     message: err.message || 'An unexpected error occurred.',
-    error: process.env.NODE_ENV === 'development' ? err : {}
+    error: process.env.NODE_ENV === 'development' ? err : {} // Only show stack in dev
   });
 });
 
+// --- Start Server ---
 server.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
   console.log(`WebSocket server is listening on ws://localhost:${PORT}`);
