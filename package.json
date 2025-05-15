@@ -1,0 +1,27 @@
+{
+  "name": "always-connected-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Root for Always Connected app, manages frontend and backend development.",
+  "scripts": {
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev": "concurrently \"npm:dev:frontend\" \"npm:dev:backend\" -n \"FRONTEND,BACKEND\" -c \"bgBlue.bold,bgMagenta.bold\"",
+    "install:frontend": "npm install --prefix frontend",
+    "install:backend": "npm install --prefix backend",
+    "install:all": "npm install && npm run install:frontend && npm run install:backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "start:backend": "npm start --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/frontend/public/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F8E8EE" /> <title>Always Connected</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Optional: Custom Tailwind configuration
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              'brand-pink': '#F8E8EE', // Your primary soft pink
+              'brand-pink-darker': '#E5D0D8', // A slightly darker pink for accents/hovers
+              'brand-lavender': '#E6E6FA',
+              'brand-beige': '#F5F5DC',
+              'brand-off-white': '#FAF7F7',
+              'brand-light-gray': '#E0E0E0',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Basic body styling for the chosen font and background */
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #FAF7F7; /* Soft White / Off-White */
+        margin: 0; /* Remove default margin */
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      /* Ensure the root div takes full height */
+      #root {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
