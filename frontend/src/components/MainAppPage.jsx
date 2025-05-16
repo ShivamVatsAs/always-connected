@@ -1,19 +1,19 @@
 // frontend/src/components/MainAppPage.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../../src/contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   requestNotificationPermission,
   subscribeUserToPush,
   getExistingSubscription,
   isPushSupported
-} from '../../src/utils/pushNotifications'; // We'll create this util file soon
-import { sendPushSubscriptionToServer } from '../../src/services/api'; // We'll create this API service soon
+} from '../utils/pushNotifications'; // Corrected path
+import { sendPushSubscriptionToServer } from '../services/api'; // Corrected path
 
-// --- Reusable UI Components (can be moved to a UI folder later) ---
+// --- Reusable UI Components ---
 const PredefinedButton = ({ onClick, children, color = "pink" }) => {
   const colors = {
     pink: "bg-pink-500 hover:bg-pink-600 focus:ring-pink-400",
-    lavender: "bg-purple-400 hover:bg-purple-500 focus:ring-purple-300", // A bit like lavender
+    lavender: "bg-purple-400 hover:bg-purple-500 focus:ring-purple-300",
     rose: "bg-rose-500 hover:bg-rose-600 focus:ring-rose-400",
     teal: "bg-teal-400 hover:bg-teal-500 focus:ring-teal-300"
   };
@@ -52,18 +52,18 @@ const SendButton = ({ onClick, disabled, children }) => (
 function MainAppPage() {
   const { currentUser, logout } = useAuth();
   const [customMessage, setCustomMessage] = useState('');
-  const [messages, setMessages] = useState([]); // To store and display messages
+  const [messages, setMessages] = useState([]);
   const [isSending, setIsSending] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState('Checking...');
   const [isSubscribed, setIsSubscribed] = useState(false);
 
-  const ws = useRef(null); // WebSocket reference
+  const ws = useRef(null);
 
   const predefinedMessages = [
     { text: "Love you", id: "love_you", color: "rose" },
     { text: "Miss you", id: "miss_you", color: "pink" },
     { text: "Always", id: "always", color: "lavender" },
-    { text: "My heart", id: "my_heart", color: "rose" }, // Or "My everything" / "My world"
+    { text: "My heart", id: "my_heart", color: "rose" },
     { text: "Thinking of you", id: "thinking_of_you", color: "pink" },
     { text: "Can't wait", id: "cant_wait", color: "teal" },
     { text: "Soon", id: "soon", color: "lavender" },
@@ -71,18 +71,17 @@ function MainAppPage() {
 
   const recipient = currentUser === 'Shivam' ? 'Arya' : 'Shivam';
 
-  // --- WebSocket Logic (Placeholder - to be implemented fully) ---
+  // Debug: Log messages state whenever it changes
+  useEffect(() => {
+    console.log("Messages state updated:", messages);
+  }, [messages]);
+
   useEffect(() => {
     if (!currentUser) return;
 
-    // Determine WebSocket URL based on environment
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // For local development, VITE_BACKEND_WS_URL could be ws://localhost:3001
-    // For Vercel, you'd use your deployed backend's WebSocket URL.
-    // Vercel doesn't directly support WebSockets in Serverless Functions for long-lived connections.
-    // You might need a separate service or a platform that supports WebSockets (e.g., Heroku, Render, or a dedicated WebSocket service).
-    // For now, let's assume a local setup or a compatible Vercel setup.
-    const backendWsUrl = import.meta.env.VITE_BACKEND_WS_URL || `${wsProtocol}//${window.location.host.replace(/:\d+$/, '')}:3001`;
+    // VITE_BACKEND_WS_URL should be like wss://your-backend.onrender.com (no port for standard deployments)
+    const backendWsUrl = import.meta.env.VITE_BACKEND_WS_URL || `${wsProtocol}//localhost:3001`;
 
 
     console.log(`MainAppPage: Connecting to WebSocket server at ${backendWsUrl} for user ${currentUser}`);
@@ -90,30 +89,70 @@ function MainAppPage() {
 
     ws.current.onopen = () => {
       console.log(`WebSocket connected for ${currentUser}`);
-      // Optionally send an initial message or fetch history
-      // ws.current.send(JSON.stringify({ type: 'fetchHistory', recipient: recipient }));
     };
 
     ws.current.onmessage = (event) => {
       try {
         const receivedMsg = JSON.parse(event.data);
-        console.log('WebSocket message received:', receivedMsg);
-        // Handle different message types (e.g., new message, history, error)
-        if (receivedMsg.type === 'newMessage' || receivedMsg.type === 'predefinedMessage') {
-           setMessages((prevMessages) => [
+        console.log('MAINAPPDEBUG: WebSocket message received:', receivedMsg);
+
+        if (receivedMsg.type === 'error') {
+          console.error('Error message from WebSocket server:', receivedMsg.message);
+          setMessages((prevMessages) => [
             ...prevMessages,
             {
-              ...receivedMsg,
-              sender: receivedMsg.sender, // Ensure sender is part of the payload
-              timestamp: receivedMsg.timestamp || new Date().toISOString(),
-              isOwnMessage: receivedMsg.sender === currentUser
+              id: Date.now().toString(),
+              text: `Server error: ${receivedMsg.message}`,
+              sender: "System",
+              timestamp: new Date().toISOString(),
+              isOwnMessage: false,
+              type: 'error'
             }
           ]);
-        } else if (receivedMsg.type === 'messageHistory') {
+          return;
+        }
+
+        if (receivedMsg.type === 'connectionAck') {
+            console.log('Connection Acknowledged by server:', receivedMsg.message);
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                 ws.current.send(JSON.stringify({ type: 'fetchHistory', user1: currentUser, user2: recipient }));
+            }
+            return;
+        }
+
+        // Handle new messages (predefined, custom, or echoed) and history
+        if (receivedMsg.type === 'messageHistory') {
+          console.log("MAINAPPDEBUG: Setting message history", receivedMsg.messages);
           setMessages(receivedMsg.messages.map(msg => ({
             ...msg,
+            id: msg.id || msg._id,
             isOwnMessage: msg.sender === currentUser
           })));
+        } else if (receivedMsg.type === 'newMessage' || receivedMsg.type === 'predefinedMessage' || receivedMsg.type === 'customMessage' || receivedMsg.type === 'messageEcho') {
+           console.log("MAINAPPDEBUG: Adding new/echoed message", receivedMsg);
+           setMessages((prevMessages) => {
+             // Prevent adding duplicate if an optimistic update was done and server echoes with same ID
+             if (prevMessages.some(m => m.id === receivedMsg.id)) {
+                 console.log("MAINAPPDEBUG: Message with ID already exists, not re-adding", receivedMsg.id);
+                 // Optionally, update the existing message if the echoed one has more details (e.g., Gemini note)
+                 return prevMessages.map(m => m.id === receivedMsg.id ? {
+                    ...m, // Keep original optimistic parts if any
+                    ...receivedMsg, // Override with server's version (includes Gemini note, final timestamp)
+                    isOwnMessage: receivedMsg.sender === currentUser // Ensure this is set correctly
+                 } : m);
+             }
+             const newMsg = {
+                ...receivedMsg,
+                id: receivedMsg.id || Date.now().toString(),
+                sender: receivedMsg.sender,
+                timestamp: receivedMsg.timestamp || new Date().toISOString(),
+                isOwnMessage: receivedMsg.sender === currentUser
+              };
+             console.log("MAINAPPDEBUG: Appending new message to state:", newMsg);
+             return [...prevMessages, newMsg];
+           });
+        } else {
+            console.log("MAINAPPDEBUG: Received unhandled message type", receivedMsg.type);
         }
       } catch (error) {
         console.error('Error parsing WebSocket message or updating state:', error);
@@ -122,26 +161,24 @@ function MainAppPage() {
 
     ws.current.onerror = (error) => {
       console.error('WebSocket error:', error);
+      setMessages((prev) => [...prev, { text: "WebSocket connection error. Please refresh.", sender: "System", timestamp: new Date().toISOString(), isOwnMessage: false, type: 'error', id: 'wsError' }]);
     };
 
     ws.current.onclose = () => {
       console.log(`WebSocket disconnected for ${currentUser}`);
-      // Optionally implement reconnection logic here
     };
 
-    // Cleanup WebSocket connection on component unmount
     return () => {
       if (ws.current) {
         ws.current.close();
       }
     };
-  }, [currentUser, recipient]); // Reconnect if currentUser changes (e.g., on re-login)
+  }, [currentUser, recipient]);
 
   const sendMessage = (messageContent, type = 'custom') => {
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
       console.error('WebSocket is not connected.');
-      // Add to a queue or show an error
-      setMessages(prev => [...prev, { text: "Error: Not connected. Message not sent.", sender: "System", timestamp: new Date().toISOString(), isOwnMessage: false, type: 'error' }]);
+      setMessages(prev => [...prev, { id: 'sendError', text: "Error: Not connected. Message not sent.", sender: "System", timestamp: new Date().toISOString(), isOwnMessage: false, type: 'error' }]);
       return;
     }
 
@@ -151,19 +188,13 @@ function MainAppPage() {
       text: messageContent,
       sender: currentUser,
       recipient: recipient,
-      timestamp: new Date().toISOString(),
     };
 
     ws.current.send(JSON.stringify(messagePayload));
     console.log('Message sent via WebSocket:', messagePayload);
 
-    // Optimistically add to UI, or wait for ack from server
-    // For simplicity, we'll wait for the server to echo it back via onmessage
-    // If not echoing, add it here:
-    // setMessages((prevMessages) => [...prevMessages, { ...messagePayload, isOwnMessage: true }]);
-
     if (type === 'custom') {
-      setCustomMessage(''); // Clear custom message input
+      setCustomMessage('');
     }
     setIsSending(false);
   };
@@ -177,32 +208,35 @@ function MainAppPage() {
     sendMessage(customMessage.trim(), 'custom');
   };
 
-  // --- Push Notification Logic ---
   useEffect(() => {
     if (!isPushSupported()) {
       setNotificationStatus('Push notifications not supported by this browser.');
       return;
     }
-
     const checkSubscription = async () => {
       try {
         const existingSub = await getExistingSubscription();
         if (existingSub) {
           setIsSubscribed(true);
           setNotificationStatus(`Subscribed for notifications. (${Notification.permission})`);
-          // Optionally, re-send to server if you want to ensure it's up-to-date
-          // await sendPushSubscriptionToServer(existingSub, currentUser);
         } else {
           setIsSubscribed(false);
-          setNotificationStatus(`Click to enable notifications. (${Notification.permission})`);
+          if (Notification.permission === 'granted') {
+            // Permission was granted previously, but no subscription found. Maybe offer to re-subscribe.
+            setNotificationStatus('Permission granted, but not subscribed. Try enabling notifications.');
+          } else {
+            setNotificationStatus(`Click to enable notifications. (${Notification.permission})`);
+          }
         }
       } catch (error) {
         console.error("Error checking push subscription:", error);
         setNotificationStatus('Error checking notification status.');
       }
     };
-    checkSubscription();
-  }, [currentUser]); // Re-check if user changes
+    if (currentUser) {
+        checkSubscription();
+    }
+  }, [currentUser, isSubscribed]); // Added isSubscribed to re-check if it changes
 
   const handleSubscribeToPush = async () => {
     if (!isPushSupported() || !currentUser) return;
@@ -214,12 +248,12 @@ function MainAppPage() {
         setNotificationStatus('Permission granted. Subscribing...');
         const subscription = await subscribeUserToPush();
         if (subscription) {
-          await sendPushSubscriptionToServer(subscription, currentUser); // Send to backend
-          setIsSubscribed(true);
+          await sendPushSubscriptionToServer(subscription, currentUser);
+          setIsSubscribed(true); // This should trigger the useEffect above to update status
           setNotificationStatus('Successfully subscribed to notifications!');
           console.log('User subscribed to push:', subscription);
         } else {
-          setNotificationStatus('Failed to subscribe. Try again?');
+          setNotificationStatus('Failed to subscribe. Check console for VAPID key errors. Try again?');
           setIsSubscribed(false);
         }
       } else if (permission === 'denied') {
@@ -236,31 +270,25 @@ function MainAppPage() {
     }
   };
 
-
   const handleLogout = () => {
-    // Consider unsubscribing from push or clearing server-side session related to this device
-    // For example, if the push subscription is tied to this session.
-    // For now, AuthContext's logout clears localStorage.
     logout();
-    // The App.jsx will then redirect to the login screen.
   };
 
-  // Scroll to bottom of messages when new messages arrive
   const messagesEndRef = useRef(null);
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
   useEffect(scrollToBottom, [messages]);
 
+  console.log("MAINAPPDEBUG: Rendering MainAppPage, messages.length:", messages.length);
 
   if (!currentUser) {
-    return <div className="p-8 text-center">Loading user...</div>; // Should be handled by App.jsx routing
+    return <div className="p-8 text-center">Loading user...</div>;
   }
 
   return (
     <div className="min-h-screen bg-brand-beige flex flex-col items-center justify-start p-2 sm:p-4">
       <div className="w-full max-w-2xl bg-white rounded-xl shadow-2xl flex flex-col h-[95vh] sm:h-[90vh] overflow-hidden">
-        {/* Header */}
         <header className="bg-brand-pink text-white p-4 sm:p-5 shadow-md flex justify-between items-center">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold">Always Connected</h1>
@@ -274,31 +302,33 @@ function MainAppPage() {
           </button>
         </header>
 
-        {/* Message Display Area */}
         <main className="flex-grow p-3 sm:p-4 overflow-y-auto bg-gray-50">
-          {messages.length === 0 && (
+          {/* Debug: Always show messages if any, or the "No messages" text */}
+          {console.log("MAINAPPDEBUG: In JSX, messages.length:", messages.length)}
+          {messages.length === 0 ? (
             <p className="text-center text-gray-500 mt-10">No messages yet. Send one!</p>
+          ) : (
+            messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`mb-3 p-3 rounded-lg max-w-[80%] sm:max-w-[70%] break-words ${
+                  msg.isOwnMessage
+                    ? 'bg-pink-100 text-pink-800 ml-auto text-right shadow'
+                    : 'bg-purple-100 text-purple-800 mr-auto text-left shadow'
+                }`}
+              >
+                {!msg.isOwnMessage && msg.sender !== "System" && <p className="text-xs font-semibold mb-1">{msg.sender}:</p>}
+                <p className="text-sm sm:text-base">{msg.text}</p>
+                {msg.sender !== "System" && msg.timestamp && <p className="text-xs text-gray-500 mt-1">
+                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>}
+              </div>
+            ))
           )}
-          {messages.map((msg, index) => (
-            <div
-              key={msg.id || index} // Prefer a unique msg.id from server
-              className={`mb-3 p-3 rounded-lg max-w-[80%] sm:max-w-[70%] break-words ${
-                msg.isOwnMessage
-                  ? 'bg-pink-100 text-pink-800 ml-auto text-right shadow'
-                  : 'bg-purple-100 text-purple-800 mr-auto text-left shadow'
-              }`}
-            >
-              {!msg.isOwnMessage && <p className="text-xs font-semibold mb-1">{msg.sender || 'Unknown'}:</p>}
-              <p className="text-sm sm:text-base">{msg.text || (msg.originalText + ' ' + msg.geminiNote)}</p>
-              <p className="text-xs text-gray-500 mt-1">
-                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </p>
-            </div>
-          ))}
-          <div ref={messagesEndRef} /> {/* For auto-scrolling */}
+          <div ref={messagesEndRef} />
         </main>
 
-        {/* Push Notification Subscription UI */}
+        {/* Push Notification UI */}
         {!isSubscribed && isPushSupported() && Notification.permission !== 'denied' && (
           <div className="p-3 bg-yellow-100 border-t border-b border-yellow-300 text-center">
             <p className="text-sm text-yellow-800 mb-2">{notificationStatus}</p>
@@ -316,8 +346,6 @@ function MainAppPage() {
              </div>
         )}
 
-
-        {/* Message Input Area */}
         <footer className="bg-white p-3 sm:p-4 border-t border-gray-200 shadow-inner">
           <div className="mb-3 text-center sm:text-left">
             <p className="text-sm text-gray-600 mb-2">Quick thoughts for {recipient}:</p>
